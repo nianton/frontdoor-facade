@@ -1,0 +1,15 @@
+{
+    "$schema": "http://json.schemastore.org/proxies",
+    "proxies": {
+        "catchall": {            
+            "matchCondition": {
+                "methods": [ "GET", "PUT", "POST", "DELETE", "OPTIONS", "HEAD", "PATCH" ],
+                "route": "/proxied/{*all}"
+            },
+            "backendUri": "http://%BackendBaseUrl%/{all}",
+            "responseOverrides": { 
+                "response.headers.BackendUri": "%BackendBaseUrl%"
+            }
+        }
+    }
+}
