@@ -8,7 +8,7 @@ param sku object = {
 }
 
 resource storage 'Microsoft.Storage/storageAccounts@2019-06-01' = {  
-  name: toLower(replace(name, '-', ''))  
+  name: toLower(replace(replace(name, '-', ''), ' ', ''))
   location: location  
   kind: kind
   sku: sku
@@ -18,10 +18,10 @@ resource storage 'Microsoft.Storage/storageAccounts@2019-06-01' = {
   properties: {
     accessTier: 'Hot'
     supportsHttpsTrafficOnly: true
-  }  
+  }
 }
 
 output id string = storage.id
 output name string = storage.name
 output primaryKey string = listKeys(storage.id, storage.apiVersion).keys[0].value
-output connectionString string = 'DefaultEndpointsProtocol=https;AccountName=${name};AccountKey=${listKeys(storage.id, storage.apiVersion).keys[0].value}'
+output connectionString string = 'DefaultEndpointsProtocol=https;AccountName=${storage.name};AccountKey=${listKeys(storage.id, storage.apiVersion).keys[0].value}'

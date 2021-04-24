@@ -1,0 +1,652 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "project": {
+      "type": "string",
+      "defaultValue": "fdproxy"
+    },
+    "environment": {
+      "type": "string",
+      "defaultValue": "dev"
+    },
+    "location": {
+      "type": "string",
+      "defaultValue": "[resourceGroup().location]"
+    },
+    "backendBaseUrl1": {
+      "type": "string"
+    },
+    "backendBaseUrl2": {
+      "type": "string"
+    }
+  },
+  "functions": [],
+  "variables": {
+    "tags": {
+      "project": "[parameters('project')]",
+      "environment": "[parameters('environment')]"
+    },
+    "prefix": "[format('{0}-{1}', parameters('project'), parameters('environment'))]",
+    "resourceNames": {
+      "frontDoor": "[format('{0}-fd', variables('prefix'))]",
+      "funcServicePlan": "[format('{0}-asp', variables('prefix'))]",
+      "funcApp1": "[format('{0}-func1', variables('prefix'))]",
+      "funcApp2": "[format('{0}-func2', variables('prefix'))]",
+      "funcAppIns": "[format('{0}-func-appins', variables('prefix'))]"
+    },
+    "funcWorkerRuntime": "dotnet",
+    "funcExtensionVersion": "~3"
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Network/frontDoors",
+      "apiVersion": "2020-05-01",
+      "name": "[variables('resourceNames').frontDoor]",
+      "location": "Global",
+      "properties": {
+        "backendPools": [
+          {
+            "name": "redirection-funcs",
+            "properties": {
+              "loadBalancingSettings": {
+                "id": "[format('{0}/LoadBalancingSettings/loadBalancingSettings-{1}', resourceId('Microsoft.Network/frontdoors', variables('resourceNames').frontDoor), uniqueString(resourceGroup().id))]"
+              },
+              "healthProbeSettings": {
+                "id": "[format('{0}/HealthProbeSettings/healthProbeSettings-{1}', resourceId('Microsoft.Network/frontdoors', variables('resourceNames').frontDoor), uniqueString(resourceGroup().id))]"
+              },
+              "backends": [
+                {
+                  "address": "[reference(resourceId('Microsoft.Resources/deployments', 'funcApp1'), '2019-10-01').outputs.hostName.value]",
+                  "priority": 1,
+                  "httpPort": 80,
+                  "httpsPort": 443,
+                  "weight": 50,
+                  "backendHostHeader": "[reference(resourceId('Microsoft.Resources/deployments', 'funcApp1'), '2019-10-01').outputs.hostName.value]"
+                },
+                {
+                  "address": "[reference(resourceId('Microsoft.Resources/deployments', 'funcApp2'), '2019-10-01').outputs.hostName.value]",
+                  "priority": 1,
+                  "httpPort": 80,
+                  "httpsPort": 443,
+                  "weight": 50,
+                  "backendHostHeader": "[reference(resourceId('Microsoft.Resources/deployments', 'funcApp2'), '2019-10-01').outputs.hostName.value]"
+                }
+              ]
+            }
+          }
+        ],
+        "healthProbeSettings": [
+          {
+            "name": "[format('healthProbeSettings-{0}', uniqueString(resourceGroup().id))]",
+            "properties": {
+              "healthProbeMethod": "HEAD",
+              "intervalInSeconds": 30,
+              "path": "/",
+              "protocol": "Https"
+            }
+          }
+        ],
+        "loadBalancingSettings": [
+          {
+            "name": "[format('loadBalancingSettings-{0}', uniqueString(resourceGroup().id))]",
+            "properties": {
+              "sampleSize": 4,
+              "additionalLatencyMilliseconds": 0,
+              "successfulSamplesRequired": 2
+            }
+          }
+        ],
+        "frontendEndpoints": [
+          {
+            "name": "[format('{0}-azurefd-net', variables('resourceNames').frontDoor)]",
+            "properties": {
+              "hostName": "[format('{0}.azurefd.net', variables('resourceNames').frontDoor)]",
+              "sessionAffinityEnabledState": "Disabled"
+            }
+          }
+        ],
+        "routingRules": [
+          {
+            "name": "default-routing-rule",
+            "properties": {
+              "frontendEndpoints": [
+                {
+                  "id": "[format('{0}/FrontendEndpoints/{1}-azurefd-net', resourceId('Microsoft.Network/frontdoors', variables('resourceNames').frontDoor), variables('resourceNames').frontDoor)]"
+                }
+              ],
+              "patternsToMatch": [
+                "/*"
+              ],
+              "acceptedProtocols": [
+                "Http",
+                "Https"
+              ],
+              "routeConfiguration": {
+                "@odata.type": "#Microsoft.Azure.FrontDoor.Models.FrontdoorForwardingConfiguration",
+                "forwardingProtocol": "HttpsOnly",
+                "backendPool": {
+                  "id": "[format('{0}/BackendPools/redirection-funcs', resourceId('Microsoft.Network/frontdoors', variables('resourceNames').frontDoor))]"
+                }
+              }
+            }
+          }
+        ]
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Resources/deployments', 'funcApp1')]",
+        "[resourceId('Microsoft.Resources/deployments', 'funcApp2')]"
+      ]
+    },
+    {
+      "type": "Microsoft.Web/serverfarms",
+      "apiVersion": "2020-06-01",
+      "name": "[variables('resourceNames').funcServicePlan]",
+      "location": "[parameters('location')]",
+      "tags": "[variables('tags')]",
+      "sku": {
+        "name": "Y1",
+        "tier": "Consumption"
+      }
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2019-10-01",
+      "name": "[variables('resourceNames').funcAppIns]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "name": {
+            "value": "[variables('resourceNames').funcAppIns]"
+          },
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "tags": {
+            "value": "[variables('tags')]"
+          },
+          "project": {
+            "value": "[parameters('project')]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "parameters": {
+            "name": {
+              "type": "string",
+              "defaultValue": "nianton"
+            },
+            "project": {
+              "type": "string"
+            },
+            "location": {
+              "type": "string"
+            },
+            "tags": {
+              "type": "object",
+              "defaultValue": {}
+            }
+          },
+          "functions": [],
+          "variables": {
+            "workspaceName": "[format('{0}-lawp', parameters('name'))]"
+          },
+          "resources": [
+            {
+              "type": "Microsoft.OperationalInsights/workspaces",
+              "apiVersion": "2020-08-01",
+              "location": "[parameters('location')]",
+              "name": "[variables('workspaceName')]",
+              "tags": "[union(parameters('tags'), createObject('displayName', variables('workspaceName'), 'projectName', parameters('project')))]",
+              "properties": {
+                "retentionInDays": 90,
+                "sku": {
+                  "name": "PerGB2018"
+                }
+              }
+            },
+            {
+              "type": "Microsoft.Insights/components",
+              "apiVersion": "2020-02-02-preview",
+              "name": "[parameters('name')]",
+              "location": "[parameters('location')]",
+              "kind": "web",
+              "tags": "[parameters('tags')]",
+              "properties": {
+                "Application_Type": "web",
+                "Request_Source": "rest",
+                "WorkspaceResourceId": "[resourceId('Microsoft.OperationalInsights/workspaces', variables('workspaceName'))]"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.OperationalInsights/workspaces', variables('workspaceName'))]"
+              ]
+            }
+          ],
+          "outputs": {
+            "id": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.Insights/components', parameters('name'))]"
+            },
+            "instrumentationKey": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.Insights/components', parameters('name'))).InstrumentationKey]"
+            },
+            "workspaceId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.OperationalInsights/workspaces', variables('workspaceName'))]"
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2019-10-01",
+      "name": "funcApp1",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "name": {
+            "value": "[variables('resourceNames').funcApp1]"
+          },
+          "appServicePlanId": {
+            "value": "[resourceId('Microsoft.Web/serverfarms', variables('resourceNames').funcServicePlan)]"
+          },
+          "applicationInsightsKey": {
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', variables('resourceNames').funcAppIns), '2019-10-01').outputs.instrumentationKey.value]"
+          },
+          "appSettings": {
+            "value": [
+              {
+                "name": "BackendBaseUrl",
+                "value": "[parameters('backendBaseUrl1')]"
+              }
+            ]
+          },
+          "tags": {
+            "value": "[variables('tags')]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "parameters": {
+            "name": {
+              "type": "string"
+            },
+            "appServicePlanId": {
+              "type": "string"
+            },
+            "location": {
+              "type": "string",
+              "defaultValue": "[resourceGroup().location]"
+            },
+            "workerRuntime": {
+              "type": "string",
+              "defaultValue": "dotnet"
+            },
+            "extensionVersion": {
+              "type": "string",
+              "defaultValue": "~3"
+            },
+            "tags": {
+              "type": "object",
+              "defaultValue": {}
+            },
+            "applicationInsightsKey": {
+              "type": "string"
+            },
+            "appSettings": {
+              "type": "array",
+              "defaultValue": []
+            }
+          },
+          "functions": [],
+          "variables": {
+            "funcStorageName": "[format('{0}st', parameters('name'))]"
+          },
+          "resources": [
+            {
+              "type": "Microsoft.Web/sites",
+              "apiVersion": "2020-06-01",
+              "name": "[parameters('name')]",
+              "location": "[parameters('location')]",
+              "kind": "functionapp",
+              "properties": {
+                "serverFarmId": "[parameters('appServicePlanId')]",
+                "siteConfig": {
+                  "appSettings": "[union(createArray(createObject('name', 'FUNCTIONS_EXTENSION_VERSION', 'value', parameters('extensionVersion')), createObject('name', 'WEBSITE_NODE_DEFAULT_VERSION', 'value', '10.14.1'), createObject('name', 'FUNCTIONS_WORKER_RUNTIME', 'value', parameters('workerRuntime')), createObject('name', 'AzureWebJobsDashboard', 'value', reference(resourceId('Microsoft.Resources/deployments', variables('funcStorageName')), '2019-10-01').outputs.connectionString.value), createObject('name', 'AzureWebJobsStorage', 'value', reference(resourceId('Microsoft.Resources/deployments', variables('funcStorageName')), '2019-10-01').outputs.connectionString.value), createObject('name', 'WEBSITE_CONTENTAZUREFILECONNECTIONSTRING', 'value', reference(resourceId('Microsoft.Resources/deployments', variables('funcStorageName')), '2019-10-01').outputs.connectionString.value), createObject('name', 'WEBSITE_CONTENTSHARE', 'value', toLower(parameters('name'))), createObject('name', 'APPINSIGHTS_INSTRUMENTATIONKEY', 'value', parameters('applicationInsightsKey')), createObject('name', 'APPLICATIONINSIGHTS_CONNECTION_STRING', 'value', format('InstrumentationKey={0}', parameters('applicationInsightsKey')))), parameters('appSettings'))]"
+                },
+                "httpsOnly": true,
+                "clientAffinityEnabled": false
+              },
+              "tags": "[parameters('tags')]",
+              "dependsOn": [
+                "[resourceId('Microsoft.Resources/deployments', variables('funcStorageName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.Web/sites/sourcecontrols",
+              "apiVersion": "2020-06-01",
+              "name": "[format('{0}/web', parameters('name'))]",
+              "properties": {
+                "branch": "main",
+                "repoUrl": "https://github.com/nianton/frontdoor-facade",
+                "isManualIntegration": true
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Web/sites', parameters('name'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.Resources/deployments",
+              "apiVersion": "2019-10-01",
+              "name": "[variables('funcStorageName')]",
+              "properties": {
+                "expressionEvaluationOptions": {
+                  "scope": "inner"
+                },
+                "mode": "Incremental",
+                "parameters": {
+                  "name": {
+                    "value": "[variables('funcStorageName')]"
+                  },
+                  "location": {
+                    "value": "[parameters('location')]"
+                  },
+                  "tags": {
+                    "value": "[parameters('tags')]"
+                  }
+                },
+                "template": {
+                  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+                  "contentVersion": "1.0.0.0",
+                  "parameters": {
+                    "location": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "tags": {
+                      "type": "object",
+                      "defaultValue": {}
+                    },
+                    "kind": {
+                      "type": "string",
+                      "defaultValue": "StorageV2"
+                    },
+                    "sku": {
+                      "type": "object",
+                      "defaultValue": {
+                        "name": "Standard_LRS",
+                        "tier": "Standard"
+                      }
+                    }
+                  },
+                  "functions": [],
+                  "resources": [
+                    {
+                      "type": "Microsoft.Storage/storageAccounts",
+                      "apiVersion": "2019-06-01",
+                      "name": "[toLower(replace(replace(parameters('name'), '-', ''), ' ', ''))]",
+                      "location": "[parameters('location')]",
+                      "kind": "[parameters('kind')]",
+                      "sku": "[parameters('sku')]",
+                      "tags": "[union(parameters('tags'), createObject('displayName', parameters('name')))]",
+                      "properties": {
+                        "accessTier": "Hot",
+                        "supportsHttpsTrafficOnly": true
+                      }
+                    }
+                  ],
+                  "outputs": {
+                    "id": {
+                      "type": "string",
+                      "value": "[resourceId('Microsoft.Storage/storageAccounts', toLower(replace(replace(parameters('name'), '-', ''), ' ', '')))]"
+                    },
+                    "name": {
+                      "type": "string",
+                      "value": "[toLower(replace(replace(parameters('name'), '-', ''), ' ', ''))]"
+                    },
+                    "primaryKey": {
+                      "type": "string",
+                      "value": "[listKeys(resourceId('Microsoft.Storage/storageAccounts', toLower(replace(replace(parameters('name'), '-', ''), ' ', ''))), '2019-06-01').keys[0].value]"
+                    },
+                    "connectionString": {
+                      "type": "string",
+                      "value": "[format('DefaultEndpointsProtocol=https;AccountName={0};AccountKey={1}', toLower(replace(replace(parameters('name'), '-', ''), ' ', '')), listKeys(resourceId('Microsoft.Storage/storageAccounts', toLower(replace(replace(parameters('name'), '-', ''), ' ', ''))), '2019-06-01').keys[0].value)]"
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          "outputs": {
+            "hostName": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.Web/sites', parameters('name'))).defaultHostName]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Resources/deployments', variables('resourceNames').funcAppIns)]",
+        "[resourceId('Microsoft.Web/serverfarms', variables('resourceNames').funcServicePlan)]"
+      ]
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2019-10-01",
+      "name": "funcApp2",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "name": {
+            "value": "[variables('resourceNames').funcApp2]"
+          },
+          "appServicePlanId": {
+            "value": "[resourceId('Microsoft.Web/serverfarms', variables('resourceNames').funcServicePlan)]"
+          },
+          "applicationInsightsKey": {
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', variables('resourceNames').funcAppIns), '2019-10-01').outputs.instrumentationKey.value]"
+          },
+          "appSettings": {
+            "value": [
+              {
+                "name": "BackendBaseUrl",
+                "value": "[parameters('backendBaseUrl2')]"
+              }
+            ]
+          },
+          "tags": {
+            "value": "[variables('tags')]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "parameters": {
+            "name": {
+              "type": "string"
+            },
+            "appServicePlanId": {
+              "type": "string"
+            },
+            "location": {
+              "type": "string",
+              "defaultValue": "[resourceGroup().location]"
+            },
+            "workerRuntime": {
+              "type": "string",
+              "defaultValue": "dotnet"
+            },
+            "extensionVersion": {
+              "type": "string",
+              "defaultValue": "~3"
+            },
+            "tags": {
+              "type": "object",
+              "defaultValue": {}
+            },
+            "applicationInsightsKey": {
+              "type": "string"
+            },
+            "appSettings": {
+              "type": "array",
+              "defaultValue": []
+            }
+          },
+          "functions": [],
+          "variables": {
+            "funcStorageName": "[format('{0}st', parameters('name'))]"
+          },
+          "resources": [
+            {
+              "type": "Microsoft.Web/sites",
+              "apiVersion": "2020-06-01",
+              "name": "[parameters('name')]",
+              "location": "[parameters('location')]",
+              "kind": "functionapp",
+              "properties": {
+                "serverFarmId": "[parameters('appServicePlanId')]",
+                "siteConfig": {
+                  "appSettings": "[union(createArray(createObject('name', 'FUNCTIONS_EXTENSION_VERSION', 'value', parameters('extensionVersion')), createObject('name', 'WEBSITE_NODE_DEFAULT_VERSION', 'value', '10.14.1'), createObject('name', 'FUNCTIONS_WORKER_RUNTIME', 'value', parameters('workerRuntime')), createObject('name', 'AzureWebJobsDashboard', 'value', reference(resourceId('Microsoft.Resources/deployments', variables('funcStorageName')), '2019-10-01').outputs.connectionString.value), createObject('name', 'AzureWebJobsStorage', 'value', reference(resourceId('Microsoft.Resources/deployments', variables('funcStorageName')), '2019-10-01').outputs.connectionString.value), createObject('name', 'WEBSITE_CONTENTAZUREFILECONNECTIONSTRING', 'value', reference(resourceId('Microsoft.Resources/deployments', variables('funcStorageName')), '2019-10-01').outputs.connectionString.value), createObject('name', 'WEBSITE_CONTENTSHARE', 'value', toLower(parameters('name'))), createObject('name', 'APPINSIGHTS_INSTRUMENTATIONKEY', 'value', parameters('applicationInsightsKey')), createObject('name', 'APPLICATIONINSIGHTS_CONNECTION_STRING', 'value', format('InstrumentationKey={0}', parameters('applicationInsightsKey')))), parameters('appSettings'))]"
+                },
+                "httpsOnly": true,
+                "clientAffinityEnabled": false
+              },
+              "tags": "[parameters('tags')]",
+              "dependsOn": [
+                "[resourceId('Microsoft.Resources/deployments', variables('funcStorageName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.Web/sites/sourcecontrols",
+              "apiVersion": "2020-06-01",
+              "name": "[format('{0}/web', parameters('name'))]",
+              "properties": {
+                "branch": "main",
+                "repoUrl": "https://github.com/nianton/frontdoor-facade",
+                "isManualIntegration": true
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Web/sites', parameters('name'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.Resources/deployments",
+              "apiVersion": "2019-10-01",
+              "name": "[variables('funcStorageName')]",
+              "properties": {
+                "expressionEvaluationOptions": {
+                  "scope": "inner"
+                },
+                "mode": "Incremental",
+                "parameters": {
+                  "name": {
+                    "value": "[variables('funcStorageName')]"
+                  },
+                  "location": {
+                    "value": "[parameters('location')]"
+                  },
+                  "tags": {
+                    "value": "[parameters('tags')]"
+                  }
+                },
+                "template": {
+                  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+                  "contentVersion": "1.0.0.0",
+                  "parameters": {
+                    "location": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "tags": {
+                      "type": "object",
+                      "defaultValue": {}
+                    },
+                    "kind": {
+                      "type": "string",
+                      "defaultValue": "StorageV2"
+                    },
+                    "sku": {
+                      "type": "object",
+                      "defaultValue": {
+                        "name": "Standard_LRS",
+                        "tier": "Standard"
+                      }
+                    }
+                  },
+                  "functions": [],
+                  "resources": [
+                    {
+                      "type": "Microsoft.Storage/storageAccounts",
+                      "apiVersion": "2019-06-01",
+                      "name": "[toLower(replace(replace(parameters('name'), '-', ''), ' ', ''))]",
+                      "location": "[parameters('location')]",
+                      "kind": "[parameters('kind')]",
+                      "sku": "[parameters('sku')]",
+                      "tags": "[union(parameters('tags'), createObject('displayName', parameters('name')))]",
+                      "properties": {
+                        "accessTier": "Hot",
+                        "supportsHttpsTrafficOnly": true
+                      }
+                    }
+                  ],
+                  "outputs": {
+                    "id": {
+                      "type": "string",
+                      "value": "[resourceId('Microsoft.Storage/storageAccounts', toLower(replace(replace(parameters('name'), '-', ''), ' ', '')))]"
+                    },
+                    "name": {
+                      "type": "string",
+                      "value": "[toLower(replace(replace(parameters('name'), '-', ''), ' ', ''))]"
+                    },
+                    "primaryKey": {
+                      "type": "string",
+                      "value": "[listKeys(resourceId('Microsoft.Storage/storageAccounts', toLower(replace(replace(parameters('name'), '-', ''), ' ', ''))), '2019-06-01').keys[0].value]"
+                    },
+                    "connectionString": {
+                      "type": "string",
+                      "value": "[format('DefaultEndpointsProtocol=https;AccountName={0};AccountKey={1}', toLower(replace(replace(parameters('name'), '-', ''), ' ', '')), listKeys(resourceId('Microsoft.Storage/storageAccounts', toLower(replace(replace(parameters('name'), '-', ''), ' ', ''))), '2019-06-01').keys[0].value)]"
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          "outputs": {
+            "hostName": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.Web/sites', parameters('name'))).defaultHostName]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Resources/deployments', variables('resourceNames').funcAppIns)]",
+        "[resourceId('Microsoft.Web/serverfarms', variables('resourceNames').funcServicePlan)]"
+      ]
+    }
+  ],
+  "metadata": {
+    "_generator": {
+      "name": "bicep",
+      "version": "0.3.1.62928",
+      "templateHash": "15162205550668107239"
+    }
+  }
+}
