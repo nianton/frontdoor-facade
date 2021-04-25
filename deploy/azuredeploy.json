@@ -27,16 +27,15 @@
       "project": "[parameters('project')]",
       "environment": "[parameters('environment')]"
     },
-    "prefix": "[format('{0}-{1}', parameters('project'), parameters('environment'))]",
+    "seed": "[substring(uniqueString(resourceGroup().id), 0, 4)]",
+    "prefix": "[format('{0}-{1}-{2}', parameters('project'), parameters('environment'), variables('seed'))]",
     "resourceNames": {
       "frontDoor": "[format('{0}-fd', variables('prefix'))]",
       "funcServicePlan": "[format('{0}-asp', variables('prefix'))]",
       "funcApp1": "[format('{0}-func1', variables('prefix'))]",
       "funcApp2": "[format('{0}-func2', variables('prefix'))]",
       "funcAppIns": "[format('{0}-func-appins', variables('prefix'))]"
-    },
-    "funcWorkerRuntime": "dotnet",
-    "funcExtensionVersion": "~3"
+    }
   },
   "resources": [
     {
@@ -646,7 +645,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.3.1.62928",
-      "templateHash": "15162205550668107239"
+      "templateHash": "9835174002284266876"
     }
   }
 }

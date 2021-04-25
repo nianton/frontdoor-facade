@@ -9,7 +9,8 @@ var tags = {
   environment: environment
 }
 
-var prefix = '${project}-${environment}'
+var seed = substring(uniqueString(resourceGroup().id), 0, 4)
+var prefix = '${project}-${environment}-${seed}'
 var resourceNames = {
   frontDoor: '${prefix}-fd'
   funcServicePlan: '${prefix}-asp'
@@ -17,8 +18,6 @@ var resourceNames = {
   funcApp2: '${prefix}-func2'
   funcAppIns: '${prefix}-func-appins'
 }
-var funcWorkerRuntime = 'dotnet'
-var funcExtensionVersion = '~3'
 
 resource frontDoor 'Microsoft.Network/frontDoors@2020-05-01' = {
   name: resourceNames.frontDoor
